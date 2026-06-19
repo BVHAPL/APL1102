@@ -230,10 +230,10 @@ def normalize(item):
     posted = str(g("posted_date", "create_date", "createDate", "date_posted",
                    "update_date", "postedDate"))
     # Pay is returned directly in the listing on this site.
-    api_min = _to_int(d.get("salary_min_value"))
-    api_max = _to_int(d.get("salary_max_value"))
+    api_min = _to_int(d.get("salary_min_value")) or None
+    api_max = _to_int(d.get("salary_max_value")) or None
     if api_max is None:
-        api_max = _to_int(d.get("salary_value"))
+        api_max = _to_int(d.get("salary_value")) or None
     # Confirmed-working deep link format for APL.
     url = f"https://{DOMAIN}/jobs/{job_id}?lang=en-us" if job_id else \
           str(g("apply_url", "url"))
@@ -461,30 +461,30 @@ def main():
     print(f"  {len(jobs)} postings after scoring/filtering")
 
     for j in jobs:
-        if j["max_pay"] is None:
+        if not j["max_pay"]:
             lo, hi = extract_pay(j["_raw"])              # from the API text fields
             if hi is None and not args.no_pay_scrape:
                 lo, hi = pay_from_page(sess, j["url"])     # else fetch the job page
                 time.sleep(POLITE_DELAY)
             j["min_pay"], j["max_pay"] = lo, hi
 
-    # PAY DIAGNOSTIC: show where/whether pay text appears for each kept role.
-    print("  --- PAY DEBUG ---")
-    money_re = re.compile(r"\$\s?\d{2,3}(?:,\d{3})+|\$\s?\d{4,7}")
-    for j in jobs:
-        raw = j.get("_raw", {})
-        hit = None
-        for k, v in raw.items():
-            if isinstance(v, str):
-                m = money_re.search(v) or re.search(
-                    r"(?i)(minimum rate|maximum rate|salary|pay range|compensation)", v)
-                if m:
-                    s, e = max(0, m.start() - 50), min(len(v), m.start() + 110)
-                    snip = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", v[s:e])).strip()
-                    hit = f"[{k}] ...{snip}..."
-                    break
-        print(f"   {j['title'][:40]:<40} pay=({j['min_pay']},{j['max_pay']}) {hit or '(no $/pay text found)'}")
-    print("  --- END PAY DEBUG ---")
+    # PAY DIAGNOSTIC: only for roles whose pay we still couldn't resolve.
+    missing = [j for j in jobs if not j["max_pay"]]
+    if missing:
+        print("  --- PAY DEBUG (roles still missing pay) ---")
+        money_re = re.compile(r"\$\s?\d{2,3}(?:,\d{3})+|\$\s?\d{4,7}")
+        for j in missing:
+            hit = None
+            for k, v in j.get("_raw", {}).items():
+                if isinstance(v, str):
+                    m = money_re.search(v) or re.search(
+                        r"(?i)(minimum rate|maximum rate|salary|pay range)", v)
+                    if m:
+                        s, e = max(0, m.start() - 50), min(len(v), m.start() + 110)
+                        hit = f"[{k}] ...{re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', v[s:e])).strip()}..."
+                        break
+            print(f"   {j['title'][:40]:<40} {hit or '(no $/pay text found)'}")
+        print("  --- END PAY DEBUG ---")
 
     jobs.sort(key=sort_key)
 
