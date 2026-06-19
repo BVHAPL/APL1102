@@ -197,6 +197,11 @@ def normalize(item):
     desc = str(g("description", "job_description", "description_teaser", "summary"))
     posted = str(g("posted_date", "create_date", "createDate", "date_posted",
                    "update_date", "postedDate"))
+    # Pay is returned directly in the listing on this site.
+    api_min = _to_int(d.get("salary_min_value"))
+    api_max = _to_int(d.get("salary_max_value"))
+    if api_max is None:
+        api_max = _to_int(d.get("salary_value"))
     # Confirmed-working deep link format for APL.
     url = f"https://{DOMAIN}/jobs/{job_id}?lang=en-us" if job_id else \
           str(g("apply_url", "url"))
@@ -208,8 +213,8 @@ def normalize(item):
         "desc_text": re.sub(r"<[^>]+>", " ", desc),
         "posted": _clean_date(posted),
         "url": url,
-        "min_pay": None,
-        "max_pay": None,
+        "min_pay": api_min,
+        "max_pay": api_max,
         "score": 0,
         "matched": [],
     }
@@ -240,8 +245,10 @@ def score(job):
 
 
 def is_junior(job):
-    text = (job["title"] + " " + job["desc_text"]).lower()
-    return any(m in text for m in JUNIOR_MARKERS)
+    # Judge seniority from the TITLE only. Scanning descriptions produces false
+    # positives (e.g. "a graduate degree is preferred" on a senior role).
+    title = job["title"].lower()
+    return any(m in title for m in JUNIOR_MARKERS)
 
 
 # ---------------------------------------------------------------------------
@@ -348,14 +355,27 @@ def main():
 
     jobs, seen = [], set()
     kw = args.keyword.lower().strip()
+    all_scored = []
     for item in raw:
         j = normalize(item)
         if not j["id"] or j["id"] in seen:
             continue
         seen.add(j["id"])
+        score(j)
+        all_scored.append(j)
+
+    # Diagnostic: show the highest-scoring titles regardless of threshold,
+    # so we can see APL's actual role taxonomy and tune ROLE_KEYWORDS.
+    top = sorted(all_scored, key=lambda x: -x["score"])[:20]
+    print("  --- TOP 20 BY SCORE (diagnostic) ---")
+    for j in top:
+        pay = f"${j['max_pay']:,}" if j["max_pay"] else "n/a"
+        print(f"   score {j['score']:>3} | {j['title'][:55]:<55} | {pay}")
+    print("  --- END TOP 20 ---")
+
+    for j in all_scored:
         if kw and kw not in (j["title"] + " " + j["desc_text"]).lower():
             continue
-        score(j)
         if j["score"] < args.min_score:
             continue
         if not args.include_junior and is_junior(j):
@@ -364,13 +384,14 @@ def main():
 
     print(f"  {len(jobs)} postings after scoring/filtering")
 
-    print("  extracting posted pay ...")
-    for i, j in enumerate(jobs, 1):
-        lo, hi = pay_from_text(j["desc_text"])          # free: from listing text
-        if hi is None and not args.no_pay_scrape:
-            lo, hi = pay_from_page(sess, j["url"])        # fallback: fetch job page
-            time.sleep(POLITE_DELAY)
-        j["min_pay"], j["max_pay"] = lo, hi
+    if not args.no_pay_scrape:
+        # Most pay comes straight from the API; only fetch a page if it's missing.
+        for j in jobs:
+            if j["max_pay"] is None:
+                lo, hi = pay_from_page(sess, j["url"])
+                if hi is not None:
+                    j["min_pay"], j["max_pay"] = lo, hi
+                    time.sleep(POLITE_DELAY)
 
     jobs.sort(key=sort_key)
 
