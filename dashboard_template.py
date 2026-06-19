@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""
+dashboard_template.py
+=====================
+Renders the APL 1102 scanner results into a single, self-contained HTML file.
+No external dependencies, no build step, no network calls at view time:
+inline CSS + a little vanilla JS for click-to-sort columns.
+
+The scanner imports render_dashboard() from this module, so keep this file in
+the same folder as apl_1102_scanner.py.
+"""
+
+import html
+
+
+def _fmt_pay(v):
+    return f"${v:,.0f}" if isinstance(v, (int, float)) and v else "&mdash;"
+
+
+def _row(job):
+    title = html.escape(job.get("title") or "")
+    loc = html.escape(job.get("location") or "")
+    posted = html.escape(job.get("posted") or "")
+    url = html.escape(job.get("url") or "")
+    score = job.get("score") or 0
+    lo = job.get("min_pay")
+    hi = job.get("max_pay")
+    # data-* attributes hold raw sortable values
+    return f"""      <tr>
+        <td class="title"><a href="{url}" target="_blank" rel="noopener">{title}</a>
+            <div class="matched">{html.escape(', '.join(job.get('matched') or []))}</div></td>
+        <td>{loc}</td>
+        <td class="num" data-sort="{score}">{score}</td>
+        <td class="num" data-sort="{lo or 0}">{_fmt_pay(lo)}</td>
+        <td class="num" data-sort="{hi or 0}">{_fmt_pay(hi)}</td>
+        <td data-sort="{posted}">{posted}</td>
+        <td><a class="btn" href="{url}" target="_blank" rel="noopener">Open &rarr;</a></td>
+      </tr>"""
+
+
+def render_dashboard(jobs, generated_at):
+    rows = "\n".join(_row(j) for j in jobs) or (
+        '      <tr><td colspan="7" class="empty">No matching roles found. '
+        'Try a broader --keyword or raise --max-pages.</td></tr>')
+    count = len(jobs)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APL 1102 Role Scanner</title>
+<style>
+  :root {{
+    --navy:#002d62; --navy2:#0a4a8f; --ink:#1a1a1a; --line:#e2e6ec;
+    --muted:#6b7480; --bg:#f6f8fb; --accent:#c8102e;
+  }}
+  * {{ box-sizing:border-box; }}
+  body {{ margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); }}
+  header {{ background:linear-gradient(135deg,var(--navy),var(--navy2));
+            color:#fff; padding:22px 28px; }}
+  header h1 {{ margin:0; font-size:20px; letter-spacing:.3px; }}
+  header .meta {{ margin-top:4px; font-size:13px; opacity:.85; }}
+  .wrap {{ padding:20px 28px 40px; }}
+  .controls {{ margin:0 0 14px; font-size:13px; color:var(--muted); }}
+  .controls input {{ padding:7px 10px; border:1px solid var(--line); border-radius:6px;
+                     font-size:13px; width:260px; max-width:60vw; }}
+  table {{ width:100%; border-collapse:collapse; background:#fff;
+           border:1px solid var(--line); border-radius:8px; overflow:hidden;
+           box-shadow:0 1px 2px rgba(0,0,0,.04); }}
+  thead th {{ background:#f0f3f8; text-align:left; padding:11px 12px; font-size:12px;
+              text-transform:uppercase; letter-spacing:.4px; color:var(--navy);
+              cursor:pointer; user-select:none; border-bottom:2px solid var(--line);
+              white-space:nowrap; }}
+  thead th:hover {{ background:#e6ebf3; }}
+  thead th .arrow {{ font-size:10px; opacity:.5; margin-left:3px; }}
+  tbody td {{ padding:11px 12px; border-bottom:1px solid var(--line);
+              font-size:14px; vertical-align:top; }}
+  tbody tr:hover {{ background:#fafcff; }}
+  td.num {{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }}
+  td.title a {{ color:var(--navy2); font-weight:600; text-decoration:none; }}
+  td.title a:hover {{ text-decoration:underline; }}
+  .matched {{ font-size:11px; color:var(--muted); margin-top:3px; }}
+  .btn {{ display:inline-block; padding:5px 10px; background:var(--navy);
+          color:#fff; border-radius:5px; font-size:12px; text-decoration:none;
+          white-space:nowrap; }}
+  .btn:hover {{ background:var(--accent); }}
+  .empty {{ text-align:center; color:var(--muted); padding:30px; }}
+  footer {{ text-align:center; color:var(--muted); font-size:12px; padding:18px; }}
+</style>
+</head>
+<body>
+<header>
+  <h1>APL 1102 Role Scanner</h1>
+  <div class="meta">{count} matching role{'s' if count != 1 else ''} &middot;
+      sorted by maximum pay &middot; generated {html.escape(generated_at)}</div>
+</header>
+<div class="wrap">
+  <div class="controls">
+    <input id="filter" type="text" placeholder="Filter by title or location&hellip;"
+           oninput="filterRows()">
+  </div>
+  <table id="jobs">
+    <thead>
+      <tr>
+        <th onclick="sortBy(0,'text')">Title<span class="arrow">&#8597;</span></th>
+        <th onclick="sortBy(1,'text')">Location<span class="arrow">&#8597;</span></th>
+        <th onclick="sortBy(2,'num')">Score<span class="arrow">&#8597;</span></th>
+        <th onclick="sortBy(3,'num')">Min Pay<span class="arrow">&#8597;</span></th>
+        <th onclick="sortBy(4,'num')">Max Pay<span class="arrow">&#9660;</span></th>
+        <th onclick="sortBy(5,'text')">Posted<span class="arrow">&#8597;</span></th>
+        <th>Link</th>
+      </tr>
+    </thead>
+    <tbody>
+{rows}
+    </tbody>
+  </table>
+</div>
+<footer>Public APL postings via careers.jhuapl.edu &middot; pay shown only where posted.</footer>
+<script>
+  let lastCol = 4, lastDir = -1;  // default: Max Pay descending
+  function cellVal(tr, i, type) {{
+    const td = tr.children[i];
+    const raw = td.getAttribute('data-sort');
+    if (type === 'num') return parseFloat(raw !== null ? raw : td.textContent.replace(/[^0-9.]/g,'')) || 0;
+    return (raw !== null ? raw : td.textContent).toLowerCase();
+  }}
+  function sortBy(i, type) {{
+    const tb = document.querySelector('#jobs tbody');
+    const rows = Array.from(tb.querySelectorAll('tr')).filter(r => !r.querySelector('.empty'));
+    if (!rows.length) return;
+    const dir = (i === lastCol) ? -lastDir : (type === 'num' ? -1 : 1);
+    rows.sort((a,b) => {{
+      const va = cellVal(a,i,type), vb = cellVal(b,i,type);
+      if (va < vb) return -1*dir; if (va > vb) return 1*dir; return 0;
+    }});
+    rows.forEach(r => tb.appendChild(r));
+    lastCol = i; lastDir = dir;
+  }}
+  function filterRows() {{
+    const q = document.getElementById('filter').value.toLowerCase();
+    document.querySelectorAll('#jobs tbody tr').forEach(tr => {{
+      if (tr.querySelector('.empty')) return;
+      const t = (tr.children[0].textContent + ' ' + tr.children[1].textContent).toLowerCase();
+      tr.style.display = t.includes(q) ? '' : 'none';
+    }});
+  }}
+</script>
+</body>
+</html>"""
