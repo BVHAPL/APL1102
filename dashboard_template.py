@@ -22,7 +22,6 @@ def _row(job):
     loc = html.escape(job.get("location") or "")
     posted = html.escape(job.get("posted") or "")
     url = html.escape(job.get("url") or "")
-    score = job.get("score") or 0
     lo = job.get("min_pay")
     hi = job.get("max_pay")
     # data-* attributes hold raw sortable values
@@ -30,7 +29,6 @@ def _row(job):
         <td class="title"><a href="{url}" target="_blank" rel="noopener">{title}</a>
             <div class="matched">{html.escape(', '.join(job.get('matched') or []))}</div></td>
         <td>{loc}</td>
-        <td class="num" data-sort="{score}">{score}</td>
         <td class="num" data-sort="{lo or 0}">{_fmt_pay(lo)}</td>
         <td class="num" data-sort="{hi or 0}">{_fmt_pay(hi)}</td>
         <td data-sort="{posted}">{posted}</td>
@@ -40,7 +38,7 @@ def _row(job):
 
 def render_dashboard(jobs, generated_at):
     rows = "\n".join(_row(j) for j in jobs) or (
-        '      <tr><td colspan="7" class="empty">No matching roles found. '
+        '      <tr><td colspan="6" class="empty">No matching roles found. '
         'Try a broader --keyword or raise --max-pages.</td></tr>')
     count = len(jobs)
 
@@ -106,10 +104,9 @@ def render_dashboard(jobs, generated_at):
       <tr>
         <th onclick="sortBy(0,'text')">Title<span class="arrow">&#8597;</span></th>
         <th onclick="sortBy(1,'text')">Location<span class="arrow">&#8597;</span></th>
-        <th onclick="sortBy(2,'num')">Score<span class="arrow">&#8597;</span></th>
-        <th onclick="sortBy(3,'num')">Min Pay<span class="arrow">&#8597;</span></th>
-        <th onclick="sortBy(4,'num')">Max Pay<span class="arrow">&#9660;</span></th>
-        <th onclick="sortBy(5,'text')">Posted<span class="arrow">&#8597;</span></th>
+        <th onclick="sortBy(2,'num')">Min Pay<span class="arrow">&#8597;</span></th>
+        <th onclick="sortBy(3,'num')">Max Pay<span class="arrow">&#9660;</span></th>
+        <th onclick="sortBy(4,'text')">Posted<span class="arrow">&#8597;</span></th>
         <th>Link</th>
       </tr>
     </thead>
@@ -120,7 +117,7 @@ def render_dashboard(jobs, generated_at):
 </div>
 <footer>Public APL postings via careers.jhuapl.edu &middot; pay shown only where posted.</footer>
 <script>
-  let lastCol = 4, lastDir = -1;  // default: Max Pay descending
+  let lastCol = 3, lastDir = -1;  // default: Max Pay descending
   function cellVal(tr, i, type) {{
     const td = tr.children[i];
     const raw = td.getAttribute('data-sort');
