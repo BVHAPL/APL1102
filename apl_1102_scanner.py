@@ -335,6 +335,17 @@ def main():
     raw = fetch_jobs(sess, args.max_pages)
     print(f"  pulled {len(raw)} raw postings")
 
+    # One-time structure diagnostic: shows Jibe's actual field names.
+    if raw:
+        sample = raw[0]
+        print("  --- SAMPLE RECORD (for field mapping) ---")
+        print("  top-level keys:", list(sample.keys()) if isinstance(sample, dict) else type(sample))
+        inner = sample.get("data") if isinstance(sample, dict) and isinstance(sample.get("data"), dict) else None
+        if inner is not None:
+            print("  data keys:", list(inner.keys()))
+        print("  sample JSON:", json.dumps(sample)[:1200])
+        print("  --- END SAMPLE ---")
+
     jobs, seen = [], set()
     kw = args.keyword.lower().strip()
     for item in raw:
