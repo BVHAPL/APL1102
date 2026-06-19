@@ -1,0 +1,52 @@
+name: Update APL 1102 Dashboard
+
+# Regenerates the dashboard weekly and commits it as index.html so it can be
+# served from GitHub Pages (same pattern as the MCDesks project).
+#
+# Setup once:
+#   1. Put all four files in the repo root:
+#        apl_1102_scanner.py, dashboard_template.py,
+#        apl_dashboard_demo.html, update-dashboard.yml (this file, under .github/workflows/)
+#      -> this file must live at:  .github/workflows/update-dashboard.yml
+#   2. Repo Settings -> Pages -> Build and deployment -> Source: "Deploy from a branch",
+#      Branch: main / (root).  index.html will then be served at
+#      https://<you>.github.io/<repo>/
+#   3. Settings -> Actions -> General -> Workflow permissions -> "Read and write permissions".
+
+on:
+  schedule:
+    - cron: "0 11 * * 1"      # every Monday 11:00 UTC (~07:00 ET)
+  workflow_dispatch:           # also allow manual runs from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run scanner -> index.html
+        run: python3 apl_1102_scanner.py --html index.html
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Auto-update dashboard ($(date -u +'%Y-%m-%d'))"
+            git push
+          fi
