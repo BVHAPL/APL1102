@@ -83,7 +83,35 @@ ROLE_KEYWORDS = {
     "vendor management": 1,
     "grants": 1,
     "compliance": 1,
+    "agreements": 4,
+    "buyer": 4,
+    "sourcing": 3,
+    "supply chain": 2,
+    "trade compliance": 3,
+    "export control": 3,
+    "cost estimating": 2,
+    "cost estimator": 2,
 }
+
+# Terms that, when present in a TITLE, reliably indicate an acquisition /
+# contracting (1102-family) role. Used as the precision gate in the filter.
+ACQ_TITLE_TERMS = [
+    "1102", "contracting officer", "contract specialist", "contract administrat",
+    "contract management", "contract negotiat", "contracts", "subcontract",
+    "procurement", "agreements", "buyer", "sourcing", "supply chain",
+    "trade compliance", "export control", "cost and price", "price analyst",
+    "cost estimat", "purchasing",
+]
+
+
+def is_acquisition_title(title):
+    """True if the job TITLE signals an acquisition/contracting role."""
+    t = title.lower()
+    # "acquisition" in the procurement sense, not data/signal/image acquisition.
+    if "acquisition" in t and not re.search(
+            r"(data|signal|image|target|talent|requirements?)\s+acquisition", t):
+        return True
+    return any(term in t for term in ACQ_TITLE_TERMS)
 
 JUNIOR_MARKERS = [
     "intern", "internship", "co-op", "co op", "coop", "student",
@@ -329,7 +357,9 @@ def main():
     ap.add_argument("--keyword", default="",
                     help="Keep only postings whose text contains this term")
     ap.add_argument("--max-pages", type=int, default=15, help="Pages to pull (100/page)")
-    ap.add_argument("--min-score", type=int, default=2, help="Drop postings below this score")
+    ap.add_argument("--min-score", type=int, default=12,
+                    help="Score needed to keep a role that has NO acquisition "
+                         "keyword in its title (title matches are always kept)")
     ap.add_argument("--include-junior", action="store_true",
                     help="Do NOT filter intern/entry-level roles")
     ap.add_argument("--no-pay-scrape", action="store_true",
@@ -376,7 +406,9 @@ def main():
     for j in all_scored:
         if kw and kw not in (j["title"] + " " + j["desc_text"]).lower():
             continue
-        if j["score"] < args.min_score:
+        # Precision gate: keep if the TITLE signals acquisition, OR the overall
+        # score is high enough that a description-saturated role qualifies.
+        if not (is_acquisition_title(j["title"]) or j["score"] >= args.min_score):
             continue
         if not args.include_junior and is_junior(j):
             continue
@@ -384,14 +416,14 @@ def main():
 
     print(f"  {len(jobs)} postings after scoring/filtering")
 
-    if not args.no_pay_scrape:
-        # Most pay comes straight from the API; only fetch a page if it's missing.
-        for j in jobs:
-            if j["max_pay"] is None:
-                lo, hi = pay_from_page(sess, j["url"])
-                if hi is not None:
-                    j["min_pay"], j["max_pay"] = lo, hi
-                    time.sleep(POLITE_DELAY)
+    for j in jobs:
+        if j["max_pay"] is not None:
+            continue
+        lo, hi = pay_from_text(j["desc_text"])           # often in the listing text
+        if hi is None and not args.no_pay_scrape:
+            lo, hi = pay_from_page(sess, j["url"])         # else fetch the job page
+            time.sleep(POLITE_DELAY)
+        j["min_pay"], j["max_pay"] = lo, hi
 
     jobs.sort(key=sort_key)
 
