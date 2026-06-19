@@ -1,4 +1,4 @@
- #!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 APL 1102 Role Scanner
 =====================
@@ -245,6 +245,7 @@ def normalize(item):
         "desc_text": re.sub(r"<[^>]+>", " ", desc),
         "posted": _clean_date(posted),
         "url": url,
+        "_raw": d,
         "min_pay": api_min,
         "max_pay": api_max,
         "score": 0,
@@ -328,8 +329,48 @@ def pay_from_page(session, url):
 
 
 def _find_labeled(text, label_pat):
-    m = re.search(label_pat + r"[^$0-9]{0,40}" + _MONEY, text, re.IGNORECASE)
+    m = re.search(label_pat + r"[^$0-9]{0,80}" + _MONEY, text, re.IGNORECASE)
     return _to_int(m.group(1)) if m else None
+
+
+# Text fields in the API record that may carry the posted pay range.
+PAY_TEXT_FIELDS = ("description", "qualifications", "responsibilities",
+                   "salary_value", "promotion_value", "meta_data")
+
+
+def _record_text(d):
+    parts = []
+    for k in PAY_TEXT_FIELDS:
+        v = d.get(k)
+        if isinstance(v, str):
+            parts.append(v)
+        elif isinstance(v, (dict, list)):
+            parts.append(json.dumps(v))
+    return re.sub(r"<[^>]+>", " ", " ".join(parts))
+
+
+def extract_pay(d):
+    """Mine a (min, max) pay pair from the record's text fields."""
+    text = _record_text(d)
+    # 1) Labeled min / max (APL uses "Minimum Rate / Maximum Rate").
+    lo = _find_labeled(text, r"min(?:imum)?\s*(?:annual\s*|base\s*)?"
+                              r"(?:rate|salary|pay|compensation)")
+    hi = _find_labeled(text, r"max(?:imum)?\s*(?:annual\s*|base\s*)?"
+                              r"(?:rate|salary|pay|compensation)")
+    if lo and hi:
+        return (min(lo, hi), max(lo, hi))
+    # 2) A range near a pay cue: "...salary range ... $X ... $Y ...".
+    cue = re.search(r"(?i)(salary|pay\s*range|pay\s*rate|compensation|"
+                    r"hiring\s*range|annual\s*rate|referenced\s*pay)", text)
+    if cue:
+        window = text[cue.start(): cue.start() + 240]
+        nums = [n for n in (_to_int(x) for x in re.findall(_MONEY, window))
+                if n and n >= 20000]
+        if len(nums) >= 2:
+            return (min(nums[0], nums[1]), max(nums[0], nums[1]))
+    if lo or hi:
+        return (lo, hi or lo)
+    return (None, None)
 
 
 def _to_int(v):
@@ -420,13 +461,30 @@ def main():
     print(f"  {len(jobs)} postings after scoring/filtering")
 
     for j in jobs:
-        if j["max_pay"] is not None:
-            continue
-        lo, hi = pay_from_text(j["desc_text"])           # often in the listing text
-        if hi is None and not args.no_pay_scrape:
-            lo, hi = pay_from_page(sess, j["url"])         # else fetch the job page
-            time.sleep(POLITE_DELAY)
-        j["min_pay"], j["max_pay"] = lo, hi
+        if j["max_pay"] is None:
+            lo, hi = extract_pay(j["_raw"])              # from the API text fields
+            if hi is None and not args.no_pay_scrape:
+                lo, hi = pay_from_page(sess, j["url"])     # else fetch the job page
+                time.sleep(POLITE_DELAY)
+            j["min_pay"], j["max_pay"] = lo, hi
+
+    # PAY DIAGNOSTIC: show where/whether pay text appears for each kept role.
+    print("  --- PAY DEBUG ---")
+    money_re = re.compile(r"\$\s?\d{2,3}(?:,\d{3})+|\$\s?\d{4,7}")
+    for j in jobs:
+        raw = j.get("_raw", {})
+        hit = None
+        for k, v in raw.items():
+            if isinstance(v, str):
+                m = money_re.search(v) or re.search(
+                    r"(?i)(minimum rate|maximum rate|salary|pay range|compensation)", v)
+                if m:
+                    s, e = max(0, m.start() - 50), min(len(v), m.start() + 110)
+                    snip = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", v[s:e])).strip()
+                    hit = f"[{k}] ...{snip}..."
+                    break
+        print(f"   {j['title'][:40]:<40} pay=({j['min_pay']},{j['max_pay']}) {hit or '(no $/pay text found)'}")
+    print("  --- END PAY DEBUG ---")
 
     jobs.sort(key=sort_key)
 
