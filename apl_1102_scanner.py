@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ #!/usr/bin/env python3
 """
 APL 1102 Role Scanner
 =====================
@@ -116,8 +116,12 @@ def is_acquisition_title(title):
 JUNIOR_MARKERS = [
     "intern", "internship", "co-op", "co op", "coop", "student",
     "entry level", "entry-level", "early career", "apprentice",
-    "summer", "trainee", "graduate program", "new grad", "recent graduate",
+    "summer", "trainee", "graduate", "graduate program",
+    "new grad", "recent graduate",
 ]
+# Match markers as whole words so "intern" does NOT fire on "International".
+_JUNIOR_RE = re.compile(
+    r"\b(" + "|".join(re.escape(m) for m in JUNIOR_MARKERS) + r")\b")
 
 
 # ---------------------------------------------------------------------------
@@ -273,10 +277,9 @@ def score(job):
 
 
 def is_junior(job):
-    # Judge seniority from the TITLE only. Scanning descriptions produces false
-    # positives (e.g. "a graduate degree is preferred" on a senior role).
-    title = job["title"].lower()
-    return any(m in title for m in JUNIOR_MARKERS)
+    # Judge seniority from the TITLE only, matching whole words so "intern"
+    # does not fire on "International" and "graduate" not on "undergraduate".
+    return bool(_JUNIOR_RE.search(job["title"].lower()))
 
 
 # ---------------------------------------------------------------------------
